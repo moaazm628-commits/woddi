@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&family=Syne:wght@400;600;700;800&display=swap');
+@import "tailwindcss";
+
+:root {
+  --night:   #0d0f1a;
+  --night2:  #13162a;
+  --night3:  #1a1e36;
+  --gold:    #f5c842;
+  --blue:    #4f8ef7;
+  --red:     #f74f6a;
+  --green:   #3dd68c;
+  --text:    #f0f2ff;
+  --muted:   rgba(240,242,255,0.5);
+  --border:  rgba(255,255,255,0.08);
+  --font-ar: 'Tajawal', sans-serif;
+  --font-en: 'Syne', sans-serif;
+
+  /* Mobile spacing */
+  --px: 1.125rem;
+  --py: 1rem;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  /* Prevent font scaling in landscape */
+  -webkit-text-size-adjust: 100%;
+}
+
+html, body {
+  background: var(--night);
+  color: var(--text);
+  font-family: var(--font-en);
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+  /* Prevent pull-to-refresh interfering */
+  overscroll-behavior: none;
+}
+
+.ar {
+  font-family: var(--font-ar);
+  direction: rtl;
+}
+
+/* Better tap targets */
+button, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Safe area for notches */
+.safe-top    { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
