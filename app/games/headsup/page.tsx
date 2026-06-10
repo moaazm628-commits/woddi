@@ -53,7 +53,32 @@ export default function HeadsUpPage() {
     }, 1000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [running]);
+useEffect(() => {
+    if (phase !== "playing") return;
 
+    let lastTilt = 0;
+    const TILT_THRESHOLD = 25;
+    const COOLDOWN = 1200;
+
+    const handleMotion = (e: DeviceMotionEvent) => {
+      const tilt = e.accelerationIncludingGravity?.y ?? 0;
+      const now = Date.now();
+      if (now - lastTilt < COOLDOWN) return;
+
+      if (tilt > TILT_THRESHOLD) {
+        // Tilted up — Got it!
+        lastTilt = now;
+        next(true);
+      } else if (tilt < -TILT_THRESHOLD) {
+        // Tilted down — Pass
+        lastTilt = now;
+        next(false);
+      }
+    };
+
+    window.addEventListener("devicemotion", handleMotion);
+    return () => window.removeEventListener("devicemotion", handleMotion);
+  }, [phase, running]);
   const getMixWords = (): HeadsUpWord[] => {
     const all = HEADSUP_CATEGORIES.flatMap((c) => c.words);
     const unused = all.filter((w) => !usedWordsList.includes(w.word));
