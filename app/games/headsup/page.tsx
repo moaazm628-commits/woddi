@@ -39,6 +39,7 @@ export default function HeadsUpPage() {
   const [round, setRound] = useState(1);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Timer countdown
   useEffect(() => {
     if (!running || timeLeft <= 0) return;
     intervalRef.current = setInterval(() => {
@@ -53,7 +54,9 @@ export default function HeadsUpPage() {
     }, 1000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [running]);
-useEffect(() => {
+
+  // Tilt detection (motion sensor)
+  useEffect(() => {
     if (phase !== "playing") return;
 
     let lastTilt = 0;
@@ -66,19 +69,33 @@ useEffect(() => {
       if (now - lastTilt < COOLDOWN) return;
 
       if (tilt > TILT_THRESHOLD) {
-        // Tilted up — Got it!
         lastTilt = now;
         next(true);
       } else if (tilt < -TILT_THRESHOLD) {
-        // Tilted down — Pass
         lastTilt = now;
         next(false);
       }
     };
 
-    window.addEventListener("devicemotion", handleMotion);
+    const DME = DeviceMotionEvent as unknown as {
+      requestPermission?: () => Promise<"granted" | "denied">;
+    };
+
+    if (typeof DME.requestPermission === "function") {
+      DME.requestPermission()
+        .then((state) => {
+          if (state === "granted") {
+            window.addEventListener("devicemotion", handleMotion);
+          }
+        })
+        .catch(console.error);
+    } else {
+      window.addEventListener("devicemotion", handleMotion);
+    }
+
     return () => window.removeEventListener("devicemotion", handleMotion);
   }, [phase, running]);
+
   const getMixWords = (): HeadsUpWord[] => {
     const all = HEADSUP_CATEGORIES.flatMap((c) => c.words);
     const unused = all.filter((w) => !usedWordsList.includes(w.word));
@@ -104,6 +121,15 @@ useEffect(() => {
     setTimeLeft(timerDuration);
     setRunning(true);
     setPhase("playing");
+  };
+
+  const requestMotionPermissionAndStart = () => {
+    const DME = (window as any).DeviceMotionEvent;
+    if (DME && typeof DME.requestPermission === "function") {
+      DME.requestPermission().finally(startRound);
+    } else {
+      startRound();
+    }
   };
 
   const next = (correct: boolean) => {
@@ -253,7 +279,7 @@ useEffect(() => {
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
-              <Button variant="primary" fullWidth onClick={startRound}>ابدأ الجولة! 🚀</Button>
+              <Button variant="primary" fullWidth onClick={requestMotionPermissionAndStart}>ابدأ الجولة! 🚀</Button>
               <Button variant="secondary" style={{ padding: "14px 18px" }} onClick={() => setPhase(round === 1 ? "setup-teams" : "pick-category")}>←</Button>
             </div>
           </div>
