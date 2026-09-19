@@ -44,11 +44,12 @@ export default function HomePage() {
             <span style={{ color: "var(--gold)" }}>Win Together</span>
           </h1>
 
-          <p style={{
-            fontSize: "clamp(14px, 4vw, 17px)",
+                    <p style={{
+            fontSize: "clamp(13px, 3.5vw, 16px)",
             fontWeight: 600,
             color: "var(--muted)",
             marginBottom: "0.3rem",
+            whiteSpace: "nowrap",
           }}>
             less boring{" "}
             <span style={{ color: "var(--gold)" }}>more playing</span>
