@@ -39,62 +39,56 @@ export default function HeadsUpPage() {
   const [round, setRound] = useState(1);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Timer countdown
-  useEffect(() => {
-    if (!running || timeLeft <= 0) return;
-    intervalRef.current = setInterval(() => {
-      setTimeLeft((s) => {
-        if (s <= 1) {
-          setRunning(false);
-          setPhase("round-result");
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [running]);
-
-  // Tilt detection (motion sensor)
+    // Tilt detection (device orientation) — Ellen-style: neutral -> tilt -> back to neutral
   useEffect(() => {
     if (phase !== "playing") return;
 
-    let lastTilt = 0;
-    const TILT_THRESHOLD = 25;
-    const COOLDOWN = 1200;
+    // State machine: "neutral" | "tilted-forward" | "tilted-backward"
+    let state: "neutral" | "tilted-forward" | "tilted-backward" = "neutral";
 
-    const handleMotion = (e: DeviceMotionEvent) => {
-      const tilt = e.accelerationIncludingGravity?.y ?? 0;
-      const now = Date.now();
-      if (now - lastTilt < COOLDOWN) return;
+    // Beta = front-to-back tilt. When phone is flat/horizontal (landscape, held to forehead), beta is near 0.
+    // Tilting forward (screen tips down/away) increases beta toward +90.
+    // Tilting backward (screen tips up/toward sky) decreases beta toward -90 (or toward 180 depending on orientation).
+    const NEUTRAL_ZONE = 25;      // within this range of 0 = neutral/flat
+    const TRIGGER_ANGLE = 45;     // must pass this angle to trigger
 
-      if (tilt > TILT_THRESHOLD) {
-        lastTilt = now;
-        next(true);
-      } else if (tilt < -TILT_THRESHOLD) {
-        lastTilt = now;
-        next(false);
+    const handleOrientation = (e: DeviceOrientationEvent) => {
+      const beta = e.beta ?? 0; // front-back tilt
+
+      if (state === "neutral") {
+        if (beta > TRIGGER_ANGLE) {
+          state = "tilted-forward";
+          next(true); // tilt down/forward = Got it
+        } else if (beta < -TRIGGER_ANGLE) {
+          state = "tilted-backward";
+          next(false); // tilt up/backward = Pass
+        }
+      } else {
+        // Waiting to return to neutral before allowing next trigger
+        if (Math.abs(beta) < NEUTRAL_ZONE) {
+          state = "neutral";
+        }
       }
     };
 
-    const DME = DeviceMotionEvent as unknown as {
+    const DOE = DeviceOrientationEvent as unknown as {
       requestPermission?: () => Promise<"granted" | "denied">;
     };
 
-    if (typeof DME.requestPermission === "function") {
-      DME.requestPermission()
-        .then((state) => {
-          if (state === "granted") {
-            window.addEventListener("devicemotion", handleMotion);
+    if (typeof DOE.requestPermission === "function") {
+      DOE.requestPermission()
+        .then((permState) => {
+          if (permState === "granted") {
+            window.addEventListener("deviceorientation", handleOrientation);
           }
         })
         .catch(console.error);
     } else {
-      window.addEventListener("devicemotion", handleMotion);
+      window.addEventListener("deviceorientation", handleOrientation);
     }
 
-    return () => window.removeEventListener("devicemotion", handleMotion);
-  }, [phase, running]);
+    return () => window.removeEventListener("deviceorientation", handleOrientation);
+  }, [phase]);
 
   const getMixWords = (): HeadsUpWord[] => {
     const all = HEADSUP_CATEGORIES.flatMap((c) => c.words);
@@ -123,10 +117,10 @@ export default function HeadsUpPage() {
     setPhase("playing");
   };
 
-  const requestMotionPermissionAndStart = () => {
-    const DME = (window as any).DeviceMotionEvent;
-    if (DME && typeof DME.requestPermission === "function") {
-      DME.requestPermission().finally(startRound);
+    const requestMotionPermissionAndStart = () => {
+    const DOE = (window as any).DeviceOrientationEvent;
+    if (DOE && typeof DOE.requestPermission === "function") {
+      DOE.requestPermission().finally(startRound);
     } else {
       startRound();
     }
@@ -307,7 +301,7 @@ export default function HeadsUpPage() {
             </div>
 
             <div style={{ background: selectedCategory?.color || "var(--gold)", borderRadius: 24, padding: "2.5rem 1.5rem", textAlign: "center", marginBottom: "1rem", position: "relative", minHeight: "38vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-              <div style={{ position: "absolute", top: 14, fontSize: 11, color: "rgba(13,15,26,0.5)", fontWeight: 600 }}>↕ مائل للتخطي أو الإجابة</div>
+                            <div style={{ position: "absolute", top: 14, fontSize: 11, color: "rgba(13,15,26,0.5)", fontWeight: 600 }}>📱 امسك الهاتف أفقياً — أمِل للأسفل = صح، للأعلى = تخطي</div>
               <div className="ar" style={{ fontSize: "clamp(30px, 10vw, 46px)", fontWeight: 900, color: "#0d0f1a", letterSpacing: "-1px", marginBottom: 10 }}>
                 {word?.word}
               </div>
