@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #333; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+.icon {
+  width: 1024px; height: 1024px;
+  background: #0b0d18;
+  border-radius: 150px;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.grid-h { position: absolute; width: 100%; height: 0.5px; background: rgba(255,255,255,0.04); }
+.grid-v { position: absolute; height: 100%; width: 0.5px; background: rgba(255,255,255,0.04); }
+.corner-red {
+  position: absolute; top: 0; right: 0;
+  width: 0; height: 0;
+  border-style: solid;
+  border-width: 0 374px 374px 0;
+  border-color: transparent rgba(247,79,106,0.7) transparent transparent;
+}
+.corner-blue {
+  position: absolute; bottom: 0; left: 0;
+  width: 0; height: 0;
+  border-style: solid;
+  border-width: 374px 0 0 374px;
+  border-color: transparent transparent transparent rgba(79,142,247,0.5);
+}
+.stripe-main {
+  position: absolute;
+  width: 160%;
+  height: 340px;
+  background: #f5c842;
+  top: 50%;
+  left: -30%;
+  transform: translateY(-50%) rotate(-10deg);
+}
+.stripe-top {
+  position: absolute;
+  width: 160%;
+  height: 50px;
+  background: rgba(245,200,66,0.22);
+  top: 50%;
+  left: -30%;
+  transform: translateY(calc(-50% - 195px)) rotate(-10deg);
+}
+.stripe-bottom {
+  position: absolute;
+  width: 160%;
+  height: 50px;
+  background: rgba(245,200,66,0.22);
+  top: 50%;
+  left: -30%;
+  transform: translateY(calc(-50% + 195px)) rotate(-10deg);
+}
+.dot { position: absolute; border-radius: 50%; }
+.text-wrap {
+  position: absolute;
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  transform: rotate(-10deg);
+}
+.text {
+  font-family: 'Tajawal', sans-serif;
+  font-weight: 900;
+  font-size: 240px;
+  color: #0b0d18;
+  direction: rtl;
+  line-height: 1;
+  margin-top: 0px;
+}
+</style>
+</head>
+<body>
+<div class="icon">
+  <!-- Grid lines -->
+  <div class="grid-h" style="top:100px"></div>
+  <div class="grid-h" style="top:200px"></div>
+  <div class="grid-h" style="top:300px"></div>
+  <div class="grid-h" style="top:400px"></div>
+  <div class="grid-h" style="top:500px"></div>
+  <div class="grid-h" style="top:600px"></div>
+  <div class="grid-h" style="top:700px"></div>
+  <div class="grid-h" style="top:800px"></div>
+  <div class="grid-h" style="top:900px"></div>
+  <div class="grid-v" style="left:100px"></div>
+  <div class="grid-v" style="left:200px"></div>
+  <div class="grid-v" style="left:300px"></div>
+  <div class="grid-v" style="left:400px"></div>
+  <div class="grid-v" style="left:500px"></div>
+  <div class="grid-v" style="left:600px"></div>
+  <div class="grid-v" style="left:700px"></div>
+  <div class="grid-v" style="left:800px"></div>
+  <div class="grid-v" style="left:900px"></div>
+
+  <!-- Corners -->
+  <div class="corner-red"></div>
+  <div class="corner-blue"></div>
+
+  <!-- Stripes -->
+  <div class="stripe-top"></div>
+  <div class="stripe-main"></div>
+  <div class="stripe-bottom"></div>
+
+  <!-- Dots -->
+  <div class="dot" style="width:44px;height:44px;background:#3dd68c;opacity:0.8;top:110px;left:100px"></div>
+  <div class="dot" style="width:56px;height:56px;background:#f74f6a;opacity:0.6;bottom:110px;right:110px"></div>
+  <div class="dot" style="width:32px;height:32px;background:#4f8ef7;opacity:0.5;top:100px;right:120px"></div>
+  <div class="dot" style="width:40px;height:40px;background:#f5c842;opacity:0.35;bottom:100px;left:110px"></div>
+
+  <!-- Arabic text -->
+  <div class="text-wrap">
+    <div class="text">ودّي</div>
+  </div>
+</div>
+</body>
+</html>
