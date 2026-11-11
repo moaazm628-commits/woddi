@@ -6,7 +6,7 @@ import Navbar from "@/components/ui/Navbar";
 import Button from "@/components/ui/Button";
 import { HEADSUP_CATEGORIES, HeadsUpCategory, HeadsUpWord } from "@/lib/gameData";
 
-type Phase = "pick-category" | "setup-teams" | "pick-timer" | "playing" | "round-result" | "final";
+type Phase = "pick-category" | "setup-teams" | "pick-timer" | "countdown" | "playing" | "round-result" | "final";
 
 interface Team {
   name: string;
@@ -37,59 +37,104 @@ export default function HeadsUpPage() {
   const [currentTeam, setCurrentTeam] = useState(0);
   const [roundScoreInput, setRoundScoreInput] = useState("");
   const [round, setRound] = useState(1);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [count, setCount] = useState(3);
+  const [flash, setFlash] = useState<"correct" | "pass" | null>(null);
 
-    // Tilt detection (device orientation) — Ellen-style: neutral -> tilt -> back to neutral
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const audioRef = useRef<AudioContext | null>(null);
+  const nextRef = useRef<(correct: boolean) => void>(() => {});
+
+  // ── Sound ──
+  const beep = (freq: number, dur = 0.12, type: OscillatorType = "sine") => {
+    const ctx = audioRef.current;
+    if (!ctx) return;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+    o.connect(g);
+    g.connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + dur + 0.02);
+  };
+
+  const vibrate = (ms: number) => {
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(ms);
+  };
+
+  // ── Round timer ──
+  useEffect(() => {
+    if (!running) return;
+    intervalRef.current = setInterval(() => {
+      setTimeLeft((s) => {
+        if (s <= 1) {
+          if (intervalRef.current) clearInterval(intervalRef.current);
+          setRunning(false);
+          beep(180, 0.6, "sawtooth");
+          vibrate(300);
+          setPhase("round-result");
+          return 0;
+        }
+        if (s <= 6) beep(700, 0.08);
+        return s - 1;
+      });
+    }, 1000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [running]);
+
+  // ── Countdown 3-2-1 ──
+  useEffect(() => {
+    if (phase !== "countdown") return;
+    if (count <= 0) {
+      beep(1000, 0.3, "square");
+      setTimeLeft(timerDuration);
+      setRunning(true);
+      setPhase("playing");
+      return;
+    }
+    beep(600, 0.1);
+    const t = setTimeout(() => setCount((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [phase, count]);
+
+  // ── Tilt detection ──
+  // z = how much the screen faces the ceiling (+1) or the floor (-1).
+  // Works the same in portrait or landscape.
+  // Phone upright on forehead = near 0. Tilt screen to floor = correct. Tilt screen to ceiling = pass.
   useEffect(() => {
     if (phase !== "playing") return;
 
-    // State machine: "neutral" | "tilted-forward" | "tilted-backward"
-    let state: "neutral" | "tilted-forward" | "tilted-backward" = "neutral";
-
-    // Beta = front-to-back tilt. When phone is flat/horizontal (landscape, held to forehead), beta is near 0.
-    // Tilting forward (screen tips down/away) increases beta toward +90.
-    // Tilting backward (screen tips up/toward sky) decreases beta toward -90 (or toward 180 depending on orientation).
-    const NEUTRAL_ZONE = 25;      // within this range of 0 = neutral/flat
-    const TRIGGER_ANGLE = 45;     // must pass this angle to trigger
+    let armed = false; // must be upright first
+    const NEUTRAL = 0.35;
+    const TRIGGER = 0.65;
 
     const handleOrientation = (e: DeviceOrientationEvent) => {
-      const beta = e.beta ?? 0; // front-back tilt
+      if (e.beta == null || e.gamma == null) return;
+      const b = (e.beta * Math.PI) / 180;
+      const g = (e.gamma * Math.PI) / 180;
+      const z = Math.cos(b) * Math.cos(g);
 
-      if (state === "neutral") {
-        if (beta > TRIGGER_ANGLE) {
-          state = "tilted-forward";
-          next(true); // tilt down/forward = Got it
-        } else if (beta < -TRIGGER_ANGLE) {
-          state = "tilted-backward";
-          next(false); // tilt up/backward = Pass
-        }
-      } else {
-        // Waiting to return to neutral before allowing next trigger
-        if (Math.abs(beta) < NEUTRAL_ZONE) {
-          state = "neutral";
-        }
+      if (!armed) {
+        if (Math.abs(z) < NEUTRAL) armed = true;
+        return;
+      }
+      if (z <= -TRIGGER) {
+        armed = false;
+        nextRef.current(true);
+      } else if (z >= TRIGGER) {
+        armed = false;
+        nextRef.current(false);
       }
     };
 
-    const DOE = DeviceOrientationEvent as unknown as {
-      requestPermission?: () => Promise<"granted" | "denied">;
-    };
-
-    if (typeof DOE.requestPermission === "function") {
-      DOE.requestPermission()
-        .then((permState) => {
-          if (permState === "granted") {
-            window.addEventListener("deviceorientation", handleOrientation);
-          }
-        })
-        .catch(console.error);
-    } else {
-      window.addEventListener("deviceorientation", handleOrientation);
-    }
-
+    window.addEventListener("deviceorientation", handleOrientation);
     return () => window.removeEventListener("deviceorientation", handleOrientation);
   }, [phase]);
 
+  // ── Words ──
   const getMixWords = (): HeadsUpWord[] => {
     const all = HEADSUP_CATEGORIES.flatMap((c) => c.words);
     const unused = all.filter((w) => !usedWordsList.includes(w.word));
@@ -97,7 +142,7 @@ export default function HeadsUpPage() {
     return pool.sort(() => Math.random() - 0.5).slice(0, 40);
   };
 
-  const startRound = () => {
+  const beginCountdown = () => {
     const cat = selectedCategory!;
     let wordPool: HeadsUpWord[];
     if (cat.id === "mix") {
@@ -112,23 +157,43 @@ export default function HeadsUpPage() {
     setIdx(0);
     setGot(0);
     setPassed(0);
-    setTimeLeft(timerDuration);
-    setRunning(true);
-    setPhase("playing");
+    setCount(3);
+    setPhase("countdown");
   };
 
-    const requestMotionPermissionAndStart = () => {
-    const DOE = (window as any).DeviceOrientationEvent;
-    if (DOE && typeof DOE.requestPermission === "function") {
-      DOE.requestPermission().finally(startRound);
+  // Runs inside a tap, so audio + motion permission are allowed
+  const startWithPermissions = () => {
+    try {
+      const Ctor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!audioRef.current) audioRef.current = new Ctor();
+      audioRef.current.resume();
+    } catch {}
+
+    const DOE = DeviceOrientationEvent as unknown as {
+      requestPermission?: () => Promise<"granted" | "denied">;
+    };
+    if (typeof DOE.requestPermission === "function") {
+      DOE.requestPermission().finally(beginCountdown);
     } else {
-      startRound();
+      beginCountdown();
     }
   };
 
   const next = (correct: boolean) => {
-    if (correct) setGot((g) => g + 1);
-    else setPassed((p) => p + 1);
+    if (phase !== "playing") return;
+    if (correct) {
+      setGot((g) => g + 1);
+      beep(880, 0.15);
+      vibrate(60);
+    } else {
+      setPassed((p) => p + 1);
+      beep(260, 0.18, "triangle");
+    }
+    setFlash(correct ? "correct" : "pass");
+    setTimeout(() => setFlash(null), 450);
+
     if (idx + 1 >= words.length) {
       if (intervalRef.current) clearInterval(intervalRef.current);
       setRunning(false);
@@ -137,10 +202,11 @@ export default function HeadsUpPage() {
       setIdx((i) => i + 1);
     }
   };
+  nextRef.current = next;
 
   const confirmRoundScore = () => {
     const score = parseInt(roundScoreInput) || got;
-    setTeams((prev) => prev.map((t, i) => i === currentTeam ? { ...t, score: t.score + score } : t));
+    setTeams((prev) => prev.map((t, i) => (i === currentTeam ? { ...t, score: t.score + score } : t)));
     setRoundScoreInput("");
     setCurrentTeam((t) => (t + 1) % 2);
     setRound((r) => r + 1);
@@ -151,6 +217,12 @@ export default function HeadsUpPage() {
   const secs = timeLeft % 60;
   const word = words[idx];
   const allCategories = [...HEADSUP_CATEGORIES, MIX_CATEGORY];
+
+  const animations = `
+    @keyframes pop { 0% { transform: scale(0.7); opacity: 0; } 60% { transform: scale(1.06); opacity: 1; } 100% { transform: scale(1); } }
+    @keyframes flashOut { 0% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes countPop { 0% { transform: scale(2.2); opacity: 0; } 40% { transform: scale(1); opacity: 1; } 100% { transform: scale(0.9); opacity: 0.4; } }
+  `;
 
   // ── Pick Category ──
   if (phase === "pick-category") {
@@ -223,7 +295,7 @@ export default function HeadsUpPage() {
                 </label>
                 <input
                   value={teams[i].name}
-                  onChange={(e) => setTeams((prev) => prev.map((t, idx) => idx === i ? { ...t, name: e.target.value } : t))}
+                  onChange={(e) => setTeams((prev) => prev.map((t, k) => (k === i ? { ...t, name: e.target.value } : t)))}
                   placeholder={i === 0 ? "الفريق الأول..." : "الفريق الثاني..."}
                   className="ar"
                   style={{ width: "100%", background: "var(--night2)", border: `0.5px solid ${i === 0 ? "rgba(79,142,247,0.3)" : "rgba(247,79,106,0.3)"}`, borderRadius: 12, padding: "14px 16px", color: "var(--text)", fontFamily: "var(--font-ar)", fontSize: 16, direction: "rtl", outline: "none", textAlign: "right", minHeight: 52 }}
@@ -261,10 +333,10 @@ export default function HeadsUpPage() {
 
             <div style={{ textAlign: "center", marginBottom: "2rem" }}>
               <div style={{ fontSize: 80, fontWeight: 900, color: "var(--gold)", lineHeight: 1, marginBottom: 4 }}>{timerDuration}</div>
-              <div style={{ fontSize: 14, color: "var(--muted)" }}>ثانية</div>
+              <div className="ar" style={{ fontSize: 14, color: "var(--muted)" }}>ثانية</div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: "2rem" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: "1.5rem" }}>
               {[30, 60, 90, 120].map((t) => (
                 <div key={t} onClick={() => setTimerDuration(t)} style={{ background: timerDuration === t ? "var(--gold)" : "var(--night2)", color: timerDuration === t ? "#0d0f1a" : "var(--text)", border: `0.5px solid ${timerDuration === t ? "var(--gold)" : "var(--border)"}`, borderRadius: 12, padding: "14px 8px", textAlign: "center", cursor: "pointer", fontSize: 16, fontWeight: 700, WebkitTapHighlightColor: "transparent" }}>
                   {t}s
@@ -272,8 +344,15 @@ export default function HeadsUpPage() {
               ))}
             </div>
 
+            <div className="ar" style={{ background: "var(--night2)", border: "0.5px solid var(--border)", borderRadius: 14, padding: "1rem", marginBottom: "1.5rem", fontSize: 13, lineHeight: 1.8, color: "var(--muted)" }}>
+              📱 أمسك الهاتف أفقياً على جبهتك والشاشة للأمام<br />
+              ⬇️ أمِل الشاشة للأرض = صح<br />
+              ⬆️ أمِل الشاشة للسقف = تخطي<br />
+              ↩️ ارجع للوضع المستقيم قبل الكلمة التالية
+            </div>
+
             <div style={{ display: "flex", gap: 10 }}>
-              <Button variant="primary" fullWidth onClick={requestMotionPermissionAndStart}>ابدأ الجولة! 🚀</Button>
+              <Button variant="primary" fullWidth onClick={startWithPermissions}>ابدأ الجولة! 🚀</Button>
               <Button variant="secondary" style={{ padding: "14px 18px" }} onClick={() => setPhase(round === 1 ? "setup-teams" : "pick-category")}>←</Button>
             </div>
           </div>
@@ -282,59 +361,68 @@ export default function HeadsUpPage() {
     );
   }
 
+  // ── Countdown ──
+  if (phase === "countdown") {
+    return (
+      <div style={{ minHeight: "100dvh", background: selectedCategory?.color || "var(--gold)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
+        <style>{animations}</style>
+        <div className="ar" style={{ fontSize: 18, fontWeight: 700, color: "rgba(13,15,26,0.7)" }}>
+          استعد! ضع الهاتف على جبهتك
+        </div>
+        <div key={count} style={{ fontSize: 160, fontWeight: 900, color: "#0d0f1a", lineHeight: 1, animation: "countPop 1s ease-out" }}>
+          {count > 0 ? count : "🚀"}
+        </div>
+      </div>
+    );
+  }
+
   // ── Playing ──
   if (phase === "playing") {
     return (
-      <div style={{ minHeight: "100dvh", background: "var(--night)", position: "relative" }}>
-        <Stars />
-        <div style={{ position: "relative", zIndex: 1 }}>
-          <Navbar />
-          <div style={{ padding: "1.25rem var(--px) 2rem" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
-              <div>
-                <h2 style={{ fontSize: 16, fontWeight: 700 }}>{selectedCategory?.emoji} {selectedCategory?.name}</h2>
-                <div className="ar" style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>دور: {teams[currentTeam].name}</div>
-              </div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: timeLeft <= 10 ? "var(--red)" : "var(--gold)", fontVariantNumeric: "tabular-nums" }}>
-                {mins}:{String(secs).padStart(2, "0")}
-              </div>
-            </div>
+      <div style={{ minHeight: "100dvh", background: selectedCategory?.color || "var(--gold)", position: "relative", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <style>{animations}</style>
 
-            <div style={{ background: selectedCategory?.color || "var(--gold)", borderRadius: 24, padding: "2.5rem 1.5rem", textAlign: "center", marginBottom: "1rem", position: "relative", minHeight: "38vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                            <div style={{ position: "absolute", top: 14, fontSize: 11, color: "rgba(13,15,26,0.5)", fontWeight: 600 }}>📱 امسك الهاتف أفقياً — أمِل للأسفل = صح، للأعلى = تخطي</div>
-              <div className="ar" style={{ fontSize: "clamp(30px, 10vw, 46px)", fontWeight: 900, color: "#0d0f1a", letterSpacing: "-1px", marginBottom: 10 }}>
-                {word?.word}
-              </div>
-              {word?.hint && (
-                <div className="ar" style={{ fontSize: 13, color: "rgba(13,15,26,0.55)" }}>{word.hint}</div>
-              )}
-            </div>
+        {/* Top bar */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", color: "#0d0f1a" }}>
+          <div style={{ fontSize: 26, fontWeight: 900, fontVariantNumeric: "tabular-nums", color: timeLeft <= 10 ? "#b00020" : "#0d0f1a" }}>
+            {mins}:{String(secs).padStart(2, "0")}
+          </div>
+          <div className="ar" style={{ fontSize: 13, fontWeight: 700, opacity: 0.7 }}>
+            {selectedCategory?.emoji} {teams[currentTeam].name}
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 900 }}>✓ {got}</div>
+        </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: "1rem" }}>
-              <button onClick={() => next(true)} style={{ background: "var(--green)", color: "#0d0f1a", border: "none", padding: "18px 16px", borderRadius: 16, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-en)", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minHeight: 70, WebkitTapHighlightColor: "transparent" }}>
-                <span>✓ Got it!</span>
-                <span className="ar" style={{ fontSize: 12, opacity: 0.7 }}>صح</span>
-              </button>
-              <button onClick={() => next(false)} style={{ background: "rgba(247,79,106,0.15)", color: "var(--red)", border: "0.5px solid rgba(247,79,106,0.3)", padding: "18px 16px", borderRadius: 16, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-en)", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minHeight: 70, WebkitTapHighlightColor: "transparent" }}>
-                <span>→ Pass</span>
-                <span className="ar" style={{ fontSize: 12, opacity: 0.7 }}>تخطي</span>
-              </button>
-            </div>
+        {/* Word */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 20px", textAlign: "center" }}>
+          <div key={idx} className="ar" style={{ fontSize: "clamp(40px, 13vw, 90px)", fontWeight: 900, color: "#0d0f1a", lineHeight: 1.15, animation: "pop 0.28s ease-out" }}>
+            {word?.word}
+          </div>
+          {word?.hint && (
+            <div className="ar" style={{ fontSize: 15, color: "rgba(13,15,26,0.55)", marginTop: 12 }}>{word.hint}</div>
+          )}
+        </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
-              {[
-                { num: got,    color: "var(--green)", label: "صح" },
-                { num: passed, color: "var(--red)",   label: "تخطي" },
-                { num: `${mins}:${String(secs).padStart(2,"0")}`, color: timeLeft <= 10 ? "var(--red)" : "var(--gold)", label: "باقي" },
-              ].map((s, i) => (
-                <div key={i} style={{ background: "var(--night2)", border: "0.5px solid var(--border)", borderRadius: 10, padding: "0.625rem", textAlign: "center" }}>
-                  <div className="ar" style={{ fontSize: 20, fontWeight: 700, color: s.color }}>{s.num}</div>
-                  <div className="ar" style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>{s.label}</div>
-                </div>
-              ))}
+        {/* Backup buttons */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "0 18px 20px" }}>
+          <button onClick={() => next(false)} style={{ background: "rgba(13,15,26,0.15)", color: "#0d0f1a", border: "none", padding: "14px", borderRadius: 14, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "var(--font-ar)", WebkitTapHighlightColor: "transparent" }}>
+            ⬆️ تخطي
+          </button>
+          <button onClick={() => next(true)} style={{ background: "#0d0f1a", color: "#fff", border: "none", padding: "14px", borderRadius: 14, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "var(--font-ar)", WebkitTapHighlightColor: "transparent" }}>
+            ⬇️ صح
+          </button>
+        </div>
+
+        {/* Flash overlay */}
+        {flash && (
+          <div
+            style={{ position: "absolute", inset: 0, background: flash === "correct" ? "#3dd68c" : "#f74f6a", display: "flex", alignItems: "center", justifyContent: "center", animation: "flashOut 0.45s ease-out forwards", pointerEvents: "none" }}
+          >
+            <div className="ar" style={{ fontSize: 80, fontWeight: 900, color: "#0d0f1a" }}>
+              {flash === "correct" ? "صح ✓" : "تخطي"}
             </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -349,7 +437,7 @@ export default function HeadsUpPage() {
           <div style={{ padding: "1.25rem var(--px) 2rem" }}>
             <div style={{ textAlign: "center", marginBottom: "1.5rem" }}>
               <div style={{ fontSize: 56, marginBottom: "0.75rem" }}>⏰</div>
-              <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>انتهى الوقت!</h2>
+              <h2 className="ar" style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>انتهى الوقت!</h2>
               <p className="ar" style={{ fontSize: 13, color: "var(--muted)" }}>دور: {teams[currentTeam].name}</p>
             </div>
 
@@ -409,7 +497,7 @@ export default function HeadsUpPage() {
         <Navbar />
         <div style={{ padding: "1.25rem var(--px) 2rem", textAlign: "center" }}>
           <div style={{ fontSize: 64, marginBottom: "0.75rem" }}>🏆</div>
-          <h2 style={{ fontSize: 24, fontWeight: 900, marginBottom: "0.5rem" }}>
+          <h2 className="ar" style={{ fontSize: 24, fontWeight: 900, marginBottom: "0.5rem" }}>
             {teams[0].score === teams[1].score ? "تعادل!" : `${teams[0].score > teams[1].score ? teams[0].name : teams[1].name} فاز!`}
           </h2>
           <p className="ar" style={{ fontSize: 13, color: "var(--muted)", marginBottom: "2rem" }}>{round - 1} جولة</p>
