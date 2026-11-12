@@ -1,9 +1,5 @@
-import { HEADSUP_CATEGORIES as OLD, HeadsUpCategory } from "./gameData";
+import { HeadsUpCategory } from "./gameData";
 import { PART1 } from "./headsupPart1";
+import { PART2 } from "./headsupPart2";
 
-const replaced = PART1.map((c) => c.id);
-
-export const HEADSUP_CATEGORIES: HeadsUpCategory[] = [
-  ...PART1,
-  ...OLD.filter((c) => !replaced.includes(c.id)),
-];
+export const HEADSUP_CATEGORIES: HeadsUpCategory[] = [...PART1, ...PART2];
