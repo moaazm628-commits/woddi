@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import Stars from "@/components/ui/Stars";
 import Navbar from "@/components/ui/Navbar";
 import Button from "@/components/ui/Button";
-import { HEADSUP_CATEGORIES, HeadsUpCategory, HeadsUpWord } from "@/lib/gameData";
+import { HeadsUpCategory, HeadsUpWord } from "@/lib/gameData";
+import { HEADSUP_CATEGORIES } from "@/lib/headsupWords";
 
 type Phase = "pick-category" | "setup-teams" | "pick-timer" | "countdown" | "playing" | "round-result" | "final";
 
