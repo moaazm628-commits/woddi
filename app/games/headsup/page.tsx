@@ -21,6 +21,39 @@ const MIX_CATEGORY: HeadsUpCategory = {
   words: [],
 };
 
+// Shows its children in landscape. If the phone is still in portrait,
+// the content is rotated 90° so it still reads as landscape.
+function LandscapeShell({ background, children }: { background: string; children: React.ReactNode }) {
+  const [vp, setVp] = useState({ w: 0, h: 0 });
+
+  useEffect(() => {
+    const update = () => setVp({ w: window.innerWidth, h: window.innerHeight });
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
+
+  const portrait = vp.h > vp.w;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background, overflow: "hidden" }}>
+      <div
+        style={
+          portrait
+            ? { position: "absolute", top: 0, left: 0, width: vp.h, height: vp.w, transformOrigin: "top left", transform: "rotate(90deg) translateY(-100%)" }
+            : { position: "absolute", inset: 0 }
+        }
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function HeadsUpPage() {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("pick-category");
@@ -28,7 +61,6 @@ export default function HeadsUpPage() {
   const [teams, setTeams] = useState<Team[]>([{ name: "", score: 0 }, { name: "", score: 0 }]);
   const [timerDuration, setTimerDuration] = useState(60);
   const [words, setWords] = useState<HeadsUpWord[]>([]);
-  const [usedWordsList, setUsedWordsList] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);
   const [got, setGot] = useState(0);
   const [passed, setPassed] = useState(0);
@@ -43,6 +75,8 @@ export default function HeadsUpPage() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const audioRef = useRef<AudioContext | null>(null);
   const nextRef = useRef<(correct: boolean) => void>(() => {});
+  // words already SHOWN to a team, per category (so the other team never sees them)
+  const usedRef = useRef<Record<string, Set<string>>>({});
 
   // ── Sound ──
   const beep = (freq: number, dur = 0.12, type: OscillatorType = "sine") => {
@@ -64,6 +98,32 @@ export default function HeadsUpPage() {
   const vibrate = (ms: number) => {
     if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(ms);
   };
+
+  // ── Landscape lock (works on Android; iPhone uses the rotate fallback) ──
+  const lockLandscape = () => {
+    try {
+      const el = document.documentElement;
+      const fs = el.requestFullscreen ? el.requestFullscreen() : Promise.resolve();
+      fs.catch(() => {})
+        .then(() => {
+          const o = screen.orientation as unknown as { lock?: (t: string) => Promise<void> };
+          return o.lock?.("landscape");
+        })
+        .catch(() => {});
+    } catch {}
+  };
+
+  const unlockLandscape = () => {
+    try {
+      const o = screen.orientation as unknown as { unlock?: () => void };
+      o.unlock?.();
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (phase !== "countdown" && phase !== "playing") unlockLandscape();
+  }, [phase]);
 
   // ── Round timer ──
   useEffect(() => {
@@ -100,14 +160,21 @@ export default function HeadsUpPage() {
     return () => clearTimeout(t);
   }, [phase, count]);
 
+  // ── Remember every word that gets shown ──
+  useEffect(() => {
+    if (phase !== "playing" || !selectedCategory) return;
+    const w = words[idx];
+    if (!w) return;
+    if (!usedRef.current[selectedCategory.id]) usedRef.current[selectedCategory.id] = new Set();
+    usedRef.current[selectedCategory.id].add(w.word);
+  }, [phase, idx, words]);
+
   // ── Tilt detection ──
   // z = how much the screen faces the ceiling (+1) or the floor (-1).
-  // Works the same in portrait or landscape.
-  // Phone upright on forehead = near 0. Tilt screen to floor = correct. Tilt screen to ceiling = pass.
   useEffect(() => {
     if (phase !== "playing") return;
 
-    let armed = false; // must be upright first
+    let armed = false;
     const NEUTRAL = 0.35;
     const TRIGGER = 0.65;
 
@@ -134,25 +201,23 @@ export default function HeadsUpPage() {
     return () => window.removeEventListener("deviceorientation", handleOrientation);
   }, [phase]);
 
-  // ── Words ──
-  const getMixWords = (): HeadsUpWord[] => {
-    const all = HEADSUP_CATEGORIES.flatMap((c) => c.words);
-    const unused = all.filter((w) => !usedWordsList.includes(w.word));
-    const pool = unused.length >= 10 ? unused : all;
-    return pool.sort(() => Math.random() - 0.5).slice(0, 40);
-  };
-
+  // ── Build the word list for a round (never repeats between teams) ──
   const beginCountdown = () => {
     const cat = selectedCategory!;
-    let wordPool: HeadsUpWord[];
-    if (cat.id === "mix") {
-      wordPool = getMixWords();
-    } else {
-      const allWords = [...cat.words].sort(() => Math.random() - 0.5);
-      const unused = allWords.filter((w) => !usedWordsList.includes(w.word));
-      wordPool = unused.length >= 5 ? unused : allWords;
+    const pool: HeadsUpWord[] =
+      cat.id === "mix" ? HEADSUP_CATEGORIES.flatMap((c) => c.words) : cat.words;
+
+    if (!usedRef.current[cat.id]) usedRef.current[cat.id] = new Set();
+    const used = usedRef.current[cat.id];
+
+    let fresh = pool.filter((w) => !used.has(w.word));
+    if (fresh.length < 15) {
+      used.clear();
+      fresh = [...pool];
     }
-    setUsedWordsList((prev) => [...prev, ...wordPool.map((w) => w.word)]);
+
+    const wordPool = [...fresh].sort(() => Math.random() - 0.5).slice(0, 80);
+
     setWords(wordPool);
     setIdx(0);
     setGot(0);
@@ -161,8 +226,10 @@ export default function HeadsUpPage() {
     setPhase("countdown");
   };
 
-  // Runs inside a tap, so audio + motion permission are allowed
+  // Runs inside a tap, so audio, fullscreen and motion permission are allowed
   const startWithPermissions = () => {
+    lockLandscape();
+
     try {
       const Ctor =
         window.AudioContext ||
@@ -217,6 +284,7 @@ export default function HeadsUpPage() {
   const secs = timeLeft % 60;
   const word = words[idx];
   const allCategories = [...HEADSUP_CATEGORIES, MIX_CATEGORY];
+  const accent = selectedCategory?.color || "#f5c842";
 
   const animations = `
     @keyframes pop { 0% { transform: scale(0.7); opacity: 0; } 60% { transform: scale(1.06); opacity: 1; } 100% { transform: scale(1); } }
@@ -345,7 +413,8 @@ export default function HeadsUpPage() {
             </div>
 
             <div className="ar" style={{ background: "var(--night2)", border: "0.5px solid var(--border)", borderRadius: 14, padding: "1rem", marginBottom: "1.5rem", fontSize: 13, lineHeight: 1.8, color: "var(--muted)" }}>
-              📱 أمسك الهاتف أفقياً على جبهتك والشاشة للأمام<br />
+              📱 عند الضغط على ابدأ تتحول الشاشة لوضع أفقي تلقائياً<br />
+              🔄 إذا بقيت عمودية أدِر هاتفك لليسار<br />
               ⬇️ أمِل الشاشة للأرض = صح<br />
               ⬆️ أمِل الشاشة للسقف = تخطي<br />
               ↩️ ارجع للوضع المستقيم قبل الكلمة التالية
@@ -361,69 +430,71 @@ export default function HeadsUpPage() {
     );
   }
 
-  // ── Countdown ──
+  // ── Countdown (landscape) ──
   if (phase === "countdown") {
     return (
-      <div style={{ minHeight: "100dvh", background: selectedCategory?.color || "var(--gold)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
+      <LandscapeShell background={accent}>
         <style>{animations}</style>
-        <div className="ar" style={{ fontSize: 18, fontWeight: 700, color: "rgba(13,15,26,0.7)" }}>
-          استعد! ضع الهاتف على جبهتك
+        <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <div className="ar" style={{ fontSize: 20, fontWeight: 700, color: "rgba(13,15,26,0.7)" }}>
+            استعد! ضع الهاتف على جبهتك
+          </div>
+          <div key={count} style={{ fontSize: 140, fontWeight: 900, color: "#0d0f1a", lineHeight: 1, animation: "countPop 1s ease-out" }}>
+            {count > 0 ? count : "🚀"}
+          </div>
         </div>
-        <div key={count} style={{ fontSize: 160, fontWeight: 900, color: "#0d0f1a", lineHeight: 1, animation: "countPop 1s ease-out" }}>
-          {count > 0 ? count : "🚀"}
-        </div>
-      </div>
+      </LandscapeShell>
     );
   }
 
-  // ── Playing ──
+  // ── Playing (landscape) ──
   if (phase === "playing") {
     return (
-      <div style={{ minHeight: "100dvh", background: selectedCategory?.color || "var(--gold)", position: "relative", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <LandscapeShell background={accent}>
         <style>{animations}</style>
+        <div style={{ position: "relative", width: "100%", height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
-        {/* Top bar */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", color: "#0d0f1a" }}>
-          <div style={{ fontSize: 26, fontWeight: 900, fontVariantNumeric: "tabular-nums", color: timeLeft <= 10 ? "#b00020" : "#0d0f1a" }}>
-            {mins}:{String(secs).padStart(2, "0")}
+          {/* Top bar */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 20px", color: "#0d0f1a" }}>
+            <div style={{ fontSize: 26, fontWeight: 900, fontVariantNumeric: "tabular-nums", color: timeLeft <= 10 ? "#b00020" : "#0d0f1a" }}>
+              {mins}:{String(secs).padStart(2, "0")}
+            </div>
+            <div className="ar" style={{ fontSize: 14, fontWeight: 700, opacity: 0.7 }}>
+              {selectedCategory?.emoji} {teams[currentTeam].name}
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 900 }}>✓ {got}</div>
           </div>
-          <div className="ar" style={{ fontSize: 13, fontWeight: 700, opacity: 0.7 }}>
-            {selectedCategory?.emoji} {teams[currentTeam].name}
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 900 }}>✓ {got}</div>
-        </div>
 
-        {/* Word */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 20px", textAlign: "center" }}>
-          <div key={idx} className="ar" style={{ fontSize: "clamp(40px, 13vw, 90px)", fontWeight: 900, color: "#0d0f1a", lineHeight: 1.15, animation: "pop 0.28s ease-out" }}>
-            {word?.word}
+          {/* Word */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 24px", textAlign: "center" }}>
+            <div key={idx} className="ar" style={{ fontSize: 68, fontWeight: 900, color: "#0d0f1a", lineHeight: 1.15, animation: "pop 0.28s ease-out" }}>
+              {word?.word}
+            </div>
+            {word?.hint && (
+              <div className="ar" style={{ fontSize: 16, color: "rgba(13,15,26,0.55)", marginTop: 8 }}>{word.hint}</div>
+            )}
           </div>
-          {word?.hint && (
-            <div className="ar" style={{ fontSize: 15, color: "rgba(13,15,26,0.55)", marginTop: 12 }}>{word.hint}</div>
+
+          {/* Backup buttons */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "0 20px 14px" }}>
+            <button onClick={() => next(false)} style={{ background: "rgba(13,15,26,0.15)", color: "#0d0f1a", border: "none", padding: "12px", borderRadius: 14, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "var(--font-ar)", WebkitTapHighlightColor: "transparent" }}>
+              ⬆️ تخطي
+            </button>
+            <button onClick={() => next(true)} style={{ background: "#0d0f1a", color: "#fff", border: "none", padding: "12px", borderRadius: 14, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "var(--font-ar)", WebkitTapHighlightColor: "transparent" }}>
+              ⬇️ صح
+            </button>
+          </div>
+
+          {/* Flash overlay */}
+          {flash && (
+            <div style={{ position: "absolute", inset: 0, background: flash === "correct" ? "#3dd68c" : "#f74f6a", display: "flex", alignItems: "center", justifyContent: "center", animation: "flashOut 0.45s ease-out forwards", pointerEvents: "none" }}>
+              <div className="ar" style={{ fontSize: 70, fontWeight: 900, color: "#0d0f1a" }}>
+                {flash === "correct" ? "صح ✓" : "تخطي"}
+              </div>
+            </div>
           )}
         </div>
-
-        {/* Backup buttons */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "0 18px 20px" }}>
-          <button onClick={() => next(false)} style={{ background: "rgba(13,15,26,0.15)", color: "#0d0f1a", border: "none", padding: "14px", borderRadius: 14, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "var(--font-ar)", WebkitTapHighlightColor: "transparent" }}>
-            ⬆️ تخطي
-          </button>
-          <button onClick={() => next(true)} style={{ background: "#0d0f1a", color: "#fff", border: "none", padding: "14px", borderRadius: 14, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "var(--font-ar)", WebkitTapHighlightColor: "transparent" }}>
-            ⬇️ صح
-          </button>
-        </div>
-
-        {/* Flash overlay */}
-        {flash && (
-          <div
-            style={{ position: "absolute", inset: 0, background: flash === "correct" ? "#3dd68c" : "#f74f6a", display: "flex", alignItems: "center", justifyContent: "center", animation: "flashOut 0.45s ease-out forwards", pointerEvents: "none" }}
-          >
-            <div className="ar" style={{ fontSize: 80, fontWeight: 900, color: "#0d0f1a" }}>
-              {flash === "correct" ? "صح ✓" : "تخطي"}
-            </div>
-          </div>
-        )}
-      </div>
+      </LandscapeShell>
     );
   }
 
@@ -517,7 +588,7 @@ export default function HeadsUpPage() {
               setTeams([{ name: teams[0].name, score: 0 }, { name: teams[1].name, score: 0 }]);
               setRound(1);
               setCurrentTeam(0);
-              setUsedWordsList([]);
+              usedRef.current = {};
               setPhase("pick-category");
             }}>
               لعبة جديدة 🔄
