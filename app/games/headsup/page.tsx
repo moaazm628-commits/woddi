@@ -39,13 +39,19 @@ function LandscapeShell({ background, children }: { background: string; children
 
   const portrait = vp.h > vp.w;
 
+  // Keep content away from the notch and home bar.
+  // When we rotate the screen ourselves, the phone's top edge becomes our left edge.
+  const pad = portrait
+    ? { paddingLeft: "env(safe-area-inset-top)", paddingRight: "env(safe-area-inset-bottom)" }
+    : { paddingLeft: "env(safe-area-inset-left)", paddingRight: "env(safe-area-inset-right)" };
+
   return (
-    <div style={{ position: "fixed", inset: 0, background, overflow: "hidden" }}>
+    <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100dvh", background, overflow: "hidden" }}>
       <div
         style={
           portrait
-            ? { position: "absolute", top: 0, left: 0, width: vp.h, height: vp.w, transformOrigin: "top left", transform: "rotate(90deg) translateY(-100%)" }
-            : { position: "absolute", inset: 0 }
+            ? { position: "absolute", top: 0, left: 0, width: vp.h, height: vp.w, boxSizing: "border-box", transformOrigin: "top left", transform: "rotate(90deg) translateY(-100%)", ...pad }
+            : { position: "absolute", inset: 0, boxSizing: "border-box", ...pad }
         }
       >
         {children}

@@ -1,12 +1,10 @@
-import type { Metadata } from "next";
-import { Analytics } from "@vercel/analytics/next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "ودّي — Group Games",
   description: "less boring, more playing",
   manifest: "/manifest.json",
-  themeColor: "#f5c842",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -23,14 +21,17 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#f5c842",
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ar" dir="ltr">
-      <body>
-        {children}
-        <Analytics />
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
-import { Analytics } from "@vercel/analytics/next"
